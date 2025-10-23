@@ -171,7 +171,7 @@ def save_results(splits, output_dir):
 
 
 def main():
-    graphml_file = "graph/knowledge_graph.graphml"
+    graphml_file = "../graph/knowledge_graph.graphml"
     output_dir = "graph/splits"
 
     if not os.path.exists(graphml_file):

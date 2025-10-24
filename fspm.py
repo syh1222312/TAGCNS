@@ -1,9 +1,8 @@
+import os
 import networkx as nx
 import torch
-import os
 
 
-# ==================== 1. 读取 GraphML ====================
 def load_kg_graphml(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"KG file not found: {file_path}")
@@ -26,7 +25,7 @@ def load_kg_graphml(file_path):
     print(f"[KG] Loaded: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     return G
 
-# ==================== 2. 构建索引 ====================
+
 def build_mappings(G):
     entities = list(G.nodes())
     if not entities:
@@ -43,7 +42,7 @@ def build_mappings(G):
     print(f"[Mapping] Entities: {len(entities)}, Relations: {len(relations)}")
     return entity_to_idx, relation_to_idx
 
-# ==================== 3. 初始化嵌入 & 参数 ====================
+
 def init_embeddings_and_params(entity_to_idx, relation_to_idx, dim=128, hidden=64):
     h_entities = torch.randn(len(entity_to_idx), dim)
     h_relations = torch.randn(len(relation_to_idx), dim)
@@ -52,30 +51,36 @@ def init_embeddings_and_params(entity_to_idx, relation_to_idx, dim=128, hidden=6
     W1 = torch.randn(3 * dim, hidden)
     U1 = torch.randn(hidden, 1)
 
-    # 二阶注意力：agg_one.T @ W2 @ [h_r, h_o2]
+    # 二阶注意力
     W2 = torch.randn(dim, 2 * dim)  # (d, 2d)
 
-    return h_entities, h_relations, W1, U1, W2
+    # 门控机制参数：g = sigmoid(W3 @ agg_two + b)
+    W3 = torch.randn(dim, 1)  # (dim, 1) 用于生成标量 g
+    b = torch.randn(1)  # (1,) 标量偏置
+
+    return h_entities, h_relations, W1, U1, W2, W3, b
 
 
-# ==================== 4. 核心聚合邻居====================
 def aggregate_one_and_two_hop_vectors(
         head_id, G, Max,
         h_entities, h_relations,
         entity_to_idx, relation_to_idx,
-        W1, U1, W2,
-        activate=torch.nn.LeakyReLU(0.2)  # 仅用于一阶
+        W1, U1, W2, W3, b,
+        activate=torch.nn.LeakyReLU(0.2),  # 仅用于一阶
+        sigma=torch.sigmoid  # 用于门控和最终激活
 ):
     """
+    修改说明：
+    1. 实现公式：g = sigmoid(W3 @ agg_two + b)，f(e) = σ(g * agg_two + (1 - g) * agg_one)。
+    2. 返回最终嵌入 f(e)，而不是 agg_two。
+    3. 使用 sigma（默认为 sigmoid）作为门控和最终激活函数。
     返回：
-        agg_one: 一阶邻居聚合向量（含激活）
-        agg_two: 二阶邻居聚合向量（无激活，线性打分）
+        f_e: 最终嵌入向量 f(e)，形状为 (dim,)
     """
     if head_id not in entity_to_idx:
         print(f"[Warning] Node {head_id} not in graph.")
         dim = h_entities.size(1)
-        zero = torch.zeros(dim)
-        return zero, zero
+        return torch.zeros(dim)
 
     head_idx = entity_to_idx[head_id]
     h_head = h_entities[head_idx]
@@ -104,10 +109,9 @@ def aggregate_one_and_two_hop_vectors(
                 two_hop_candidates.append((r2_idx, o2_idx, o_id))
 
     if not one_hop_triples:
-        zero = torch.zeros(dim)
-        return zero, zero
+        return torch.zeros(dim)
 
-    # --- Step 2: 一阶注意力（含激活）---
+    # --- Step 2: 一阶注意力（含激活，用于二阶查询和最终嵌入） ---
     scores_one = []
     for r_idx, o_idx in one_hop_triples:
         h_r = h_relations[r_idx]
@@ -123,9 +127,9 @@ def aggregate_one_and_two_hop_vectors(
     for alpha, (_, o_idx) in zip(alphas_one, one_hop_triples):
         agg_one += alpha.item() * h_entities[o_idx]
 
-    # --- Step 3: 二阶注意力（无激活）---
+    # --- Step 3: 二阶注意力（无激活） ---
     if not two_hop_candidates:
-        return agg_one, torch.zeros(dim)
+        return sigma(agg_one)  # 若无二阶邻居，返回激活后的一阶嵌入
 
     scores_two = []
     two_hop_list = []
@@ -147,4 +151,8 @@ def aggregate_one_and_two_hop_vectors(
     for alpha, (_, o2_idx) in zip(alphas_two, two_hop_list):
         agg_two += alpha.item() * h_entities[o2_idx]
 
-    return agg_one, agg_two;
+    # --- Step 5: 门控机制和最终嵌入 ---
+    g = sigma(agg_two @ W3 + b)  # g: 标量，sigmoid(W3 @ agg_two + b)
+    f_e = sigma(g * agg_two + (1 - g) * agg_one)  # f(e) = σ(g * f2(s) + (1 - g) * f1(s))
+
+    return f_e

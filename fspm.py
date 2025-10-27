@@ -1,6 +1,7 @@
 import os
 import networkx as nx
 import torch
+import logging
 
 
 def load_kg_graphml(file_path):
@@ -156,3 +157,39 @@ def aggregate_one_and_two_hop_vectors(
     f_e = sigma(g * agg_two + (1 - g) * agg_one)  # f(e) = σ(g * f2(s) + (1 - g) * f1(s))
 
     return f_e
+
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
+log = logging.getLogger(__name__)
+
+
+def extract_sq_pairs(graphml_path):
+    """
+    从指定的 GraphML 文件中提取所有边的头节点和尾节点 (source, target) 对。
+
+    参数:
+        graphml_path (str): GraphML 文件路径，例如 "graph/splits_full/train.graphml"
+
+    返回:
+        list of tuples: 包含所有边的 (source, target) 对列表
+    """
+    # 检查文件是否存在
+    if not os.path.exists(graphml_path):
+        log.error(f"文件不存在: {graphml_path}")
+        return []
+
+    # 读取 GraphML 文件
+    log.info(f"正在读取 GraphML 文件: {graphml_path}")
+    try:
+        G = nx.read_graphml(graphml_path)
+    except Exception as e:
+        log.error(f"读取 GraphML 文件失败: {e}")
+        return []
+
+    # 提取所有边的 (source, target) 对
+    sq_pairs = [(u, v) for u, v in G.edges()]
+
+    log.info(f"提取到 {len(sq_pairs):,} 条边的 (source, target) 对")
+
+    return sq_pairs

@@ -1,8 +1,9 @@
+import torch
+import xml.etree.ElementTree as ET
+from typing import List, Dict
+import pandas as pd
 import os
 import networkx as nx
-import torch
-import logging
-
 
 def load_kg_graphml(file_path):
     if not os.path.exists(file_path):
@@ -159,37 +160,66 @@ def aggregate_one_and_two_hop_vectors(
     return f_e
 
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
-log = logging.getLogger(__name__)
+def remove_invalid_chars(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.read()
+
+    # 删除所有控制字符（ASCII值小于32，且不包含合法的换行符、回车符等）
+    cleaned_content = ''.join(char for char in content if ord(char) >= 32 or char in '\n\r\t')
+
+    # 将清理后的内容写回文件
+    with open(file_path, 'w', encoding='utf-8') as file:
+        file.write(cleaned_content)
 
 
-def extract_sq_pairs(graphml_path):
+remove_invalid_chars("graph/splits_full/train.graphml")
+
+
+def extract_st_pairs_from_file(file_path: str) -> List[Dict[str, str]]:
     """
-    从指定的 GraphML 文件中提取所有边的头节点和尾节点 (source, target) 对。
+    从GraphML文件提取边的source-target对（ST对），包括关系（relation）。
 
-    参数:
-        graphml_path (str): GraphML 文件路径，例如 "graph/splits_full/train.graphml"
+    Args:
+        file_path (str): GraphML文件路径。
 
-    返回:
-        list of tuples: 包含所有边的 (source, target) 对列表
+    Returns:
+        List[Dict[str, str]]: 包含source, target, relation的列表。
     """
-    # 检查文件是否存在
-    if not os.path.exists(graphml_path):
-        log.error(f"文件不存在: {graphml_path}")
-        return []
+    # 解析XML文件
+    tree = ET.parse(file_path)
+    root = tree.getroot()
 
-    # 读取 GraphML 文件
-    log.info(f"正在读取 GraphML 文件: {graphml_path}")
-    try:
-        G = nx.read_graphml(graphml_path)
-    except Exception as e:
-        log.error(f"读取 GraphML 文件失败: {e}")
-        return []
+    # 命名空间处理（GraphML的默认命名空间）
+    ns = {'graphml': 'http://graphml.graphdrawing.org/xmlns'}
 
-    # 提取所有边的 (source, target) 对
-    sq_pairs = [(u, v) for u, v in G.edges()]
+    # 找到graph元素
+    graph = root.find('.//graphml:graph', ns)
+    if graph is None:
+        raise ValueError("未找到<graph>元素")
 
-    log.info(f"提取到 {len(sq_pairs):,} 条边的 (source, target) 对")
+    # 提取所有<edge>元素
+    edges = graph.findall('.//graphml:edge', ns)
 
-    return sq_pairs
+    st_pairs = []
+    for edge in edges:
+        source = edge.get('source')
+        target = edge.get('target')
+        relation = ''
+
+        # 提取<data>元素中的relation（根据提供的XML，key id是"d9"对应relation）
+        for data in edge.findall('.//graphml:data', ns):
+            key = data.get('key')
+            if key == 'd9':  # 根据XML片段，relation的key id是"d9"
+                relation = data.text or ''
+                break
+
+        if source and target:
+            st_pairs.append({
+                'source': source,
+                'target': target,
+                'relation': relation
+            })
+
+    return st_pairs
+
+

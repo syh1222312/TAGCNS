@@ -1,9 +1,8 @@
-import torch
-import xml.etree.ElementTree as ET
-from typing import List, Dict
-import pandas as pd
 import os
 import networkx as nx
+import torch
+import logging
+
 
 def load_kg_graphml(file_path):
     if not os.path.exists(file_path):
@@ -158,68 +157,4 @@ def aggregate_one_and_two_hop_vectors(
     f_e = sigma(g * agg_two + (1 - g) * agg_one)  # f(e) = σ(g * f2(s) + (1 - g) * f1(s))
 
     return f_e
-
-
-def remove_invalid_chars(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        content = file.read()
-
-    # 删除所有控制字符（ASCII值小于32，且不包含合法的换行符、回车符等）
-    cleaned_content = ''.join(char for char in content if ord(char) >= 32 or char in '\n\r\t')
-
-    # 将清理后的内容写回文件
-    with open(file_path, 'w', encoding='utf-8') as file:
-        file.write(cleaned_content)
-
-
-remove_invalid_chars("graph/splits_full/train.graphml")
-
-
-def extract_st_pairs_from_file(file_path: str) -> List[Dict[str, str]]:
-    """
-    从GraphML文件提取边的source-target对（ST对），包括关系（relation）。
-
-    Args:
-        file_path (str): GraphML文件路径。
-
-    Returns:
-        List[Dict[str, str]]: 包含source, target, relation的列表。
-    """
-    # 解析XML文件
-    tree = ET.parse(file_path)
-    root = tree.getroot()
-
-    # 命名空间处理（GraphML的默认命名空间）
-    ns = {'graphml': 'http://graphml.graphdrawing.org/xmlns'}
-
-    # 找到graph元素
-    graph = root.find('.//graphml:graph', ns)
-    if graph is None:
-        raise ValueError("未找到<graph>元素")
-
-    # 提取所有<edge>元素
-    edges = graph.findall('.//graphml:edge', ns)
-
-    st_pairs = []
-    for edge in edges:
-        source = edge.get('source')
-        target = edge.get('target')
-        relation = ''
-
-        # 提取<data>元素中的relation（根据提供的XML，key id是"d9"对应relation）
-        for data in edge.findall('.//graphml:data', ns):
-            key = data.get('key')
-            if key == 'd9':  # 根据XML片段，relation的key id是"d9"
-                relation = data.text or ''
-                break
-
-        if source and target:
-            st_pairs.append({
-                'source': source,
-                'target': target,
-                'relation': relation
-            })
-
-    return st_pairs
-
 

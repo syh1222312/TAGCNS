@@ -1,9 +1,6 @@
-from fspm import extract_st_pairs_from_file,remove_invalid_chars
-
-# 示例调用：替换为实际的 graphml 文件路径
-graphml_path = 'graph/splits_full/train.graphml'  # 替换为实际路径
-tmp=remove_invalid_chars(graphml_path)
-result = extract_st_pairs_from_file(graphml_path)
-
-# 打印或处理结果（假设函数返回某些值）
-print(len(result))
+import anchor
+if __name__ == "__main__":
+   file_path = 'data/DBLP/dblp-v12-author.json'
+   target_author_id = '2115010573'  # Replace with your target author ID
+   graph = anchor.generate_knowledge_graph(file_path, target_author_id)
+   anchor.visualize_graph(graph)

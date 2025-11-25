@@ -1,79 +1,68 @@
-import json
-import networkx as nx
 import matplotlib
-matplotlib.use('TkAgg')  # 或者试试 'QtAgg' 如果TkAgg不行
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from typing import List, Dict, Any
-
-import json
-import ijson  # 需要安装: pip install ijson
-from tqdm import tqdm  # 进度条，假设你的环境有
+import ijson
 import networkx as nx
-import matplotlib.pyplot as plt
-from typing import Dict, Any
 
+
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lambda x, **kwargs: x  # fallback, no progress bar
 
 def generate_knowledge_graph(file_path: str, target_author_id: str) -> nx.Graph:
-    """
-    使用 ijson 流式读取大JSON文件，只处理目标作者的论文，生成知识图谱。
-    显著降低内存使用和时间。
-    """
     G = nx.Graph()
-
     with open(file_path, 'r', encoding='utf-8') as f:
-        # ijson 逐项解析JSON数组
-        papers = ijson.items(f, 'item')  # 假设JSON是数组，'item' 表示每个元素
-
-        # 使用 tqdm 监控进度（假设文件有约数百万项，你可以估算total）
-        for paper in tqdm(papers, desc="Processing papers", total=1000000):  # total是估算值，调整为你的文件大小
+        papers = ijson.items(f, 'item')
+        for paper in tqdm(papers, desc="Processing papers"):
             authors = paper.get('authors', [])
-            author_ids = [author.get('id', '') for author in authors]
-
+            author_ids = [str(author.get('id', '')) for author in authors]
             if target_author_id not in author_ids:
-                continue  # 跳过无关论文，节省时间
+                continue
 
-            # 以下同原代码，添加节点和边
-            paper_id: str = paper.get('id', '')
+            paper_id = str(paper.get('id', ''))
             G.add_node(paper_id, type='paper', label=paper.get('title', 'Unknown Title'), year=paper.get('year', None))
 
             for author in authors:
-                auth_id: str = author.get('id', '')
-                auth_name: str = author.get('name', 'Unknown Author')
-                auth_org: str = author.get('org', 'Unknown Org')
+                auth_id = str(author.get('id', ''))
+                auth_name = author.get('name', 'Unknown Author')
+                auth_org = author.get('org', 'Unknown Org')
                 G.add_node(auth_id, type='author', label=auth_name, org=auth_org)
                 G.add_edge(auth_id, paper_id, relation='wrote')
 
             venue = paper.get('venue', {})
-            venue_id: str = venue.get('id', '')
-            venue_name: str = venue.get('raw', 'Unknown Venue')
+            venue_id = str(venue.get('id', ''))
+            venue_name = venue.get('raw', 'Unknown Venue')
             if venue_id:
                 G.add_node(venue_id, type='venue', label=venue_name)
                 G.add_edge(paper_id, venue_id, relation='published_in')
 
-            keywords = paper.get('keywords', [])
-            for kw in keywords:
-                G.add_node(kw, type='keyword', label=kw)
-                G.add_edge(paper_id, kw, relation='has_keyword')
+            fos_list = paper.get('fos', [])
+            for fos in fos_list:
+                fos_name = fos.get('name', '')
+                if fos_name:
+                    G.add_node(fos_name, type='fos', label=fos_name)
+                    G.add_edge(paper_id, fos_name, relation='has_fos', weight=fos.get('w', 0.0))
 
             references = paper.get('references', [])
             for ref_id in references:
-                G.add_node(ref_id, type='paper', label=ref_id)
-                G.add_edge(paper_id, ref_id, relation='cites')
+                ref_id_str = str(ref_id)
+                G.add_node(ref_id_str, type='paper', label=ref_id_str)
+                G.add_edge(paper_id, ref_id_str, relation='cites')
 
             G.nodes[paper_id]['n_citation'] = paper.get('n_citation', 0)
 
+    if len(G.nodes) == 0:
+        print(f"No papers found for author ID '{target_author_id}'.")
+
     return G
 
-
 def visualize_graph(G: nx.Graph, output_file: str = 'knowledge_graph.png') -> None:
-    """
-    可视化图。如果图太大，考虑简化（如移除关键词节点）。
-    """
-    if len(G.nodes) > 500:  # 阈值，防止太大
-        print(f"Graph too large ({len(G.nodes)} nodes). Consider simplifying.")
-        # 可选：移除关键词节点
-        keywords = [n for n, d in G.nodes(data=True) if d.get('type') == 'keyword']
-        G.remove_nodes_from(keywords)
+    if len(G.nodes) > 500:
+        print(f"Graph too large ({len(G.nodes)} nodes). Removing 'fos' nodes to simplify.")
+        fos_nodes = [n for n, d in G.nodes(data=True) if d.get('type') == 'fos']
+        G.remove_nodes_from(fos_nodes)
 
     node_colors = []
     for node in G.nodes(data=True):
@@ -84,18 +73,18 @@ def visualize_graph(G: nx.Graph, output_file: str = 'knowledge_graph.png') -> No
             node_colors.append('lightgreen')
         elif node_type == 'venue':
             node_colors.append('orange')
-        elif node_type == 'keyword':
+        elif node_type == 'fos':
             node_colors.append('pink')
         else:
             node_colors.append('gray')
 
-    pos = nx.spring_layout(G, seed=42, iterations=20)  # 减少迭代次数，加速布局
+    pos = nx.spring_layout(G, seed=42, iterations=20)
     plt.figure(figsize=(12, 12))
     nx.draw(G, pos, with_labels=True, labels=nx.get_node_attributes(G, 'label'),
             node_color=node_colors, node_size=500, font_size=8, edge_color='gray')
 
     edge_labels = nx.get_edge_attributes(G, 'relation')
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red')
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red', font_size=6)
 
     plt.title('Knowledge Graph for Author')
     plt.savefig(output_file)
